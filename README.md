@@ -1,5 +1,10 @@
 # creditratingsystem
 
+[![Minimal tests](https://github.com/rds0001/creditratingsystem-r/actions/workflows/minimal-tests.yml/badge.svg)](https://github.com/rds0001/creditratingsystem-r/actions/workflows/minimal-tests.yml)
+
+GitHub Actions installs the package and runs `tests/test-core.R` on the current
+R release and Linux. This is a minimal core check; the full test suite is separate.
+
 A native R library for granular credit risk modelling with local user data.
 
 See [getting started](inst/doc/getting_started.txt) for local installation, typed
