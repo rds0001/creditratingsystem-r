@@ -1,0 +1,29 @@
+library(creditratingsystem)
+target<-list(event="default",horizon=1,time_unit="years",probability_measure="PHYSICAL",conditioning="performing")
+training<-list(data_fingerprint="two-group-oracle",split_id="train",known_at="2025-01-01",data_origin="SYNTHETIC")
+scorecard<-fit_scorecard(matrix(c(0,0,1,1),ncol=1),c(0,1,0,1),"x",list(neutral_profile=0,feature_kinds="expert"),target,training,"scorecard","1",weights=c(8,2,4,6))
+scored<-score_scorecard(scorecard,matrix(c(0,1),ncol=1),"x",target)
+stopifnot(max(abs(predict_pd(scorecard,matrix(c(0,1),ncol=1),"x",target)$value-c(.2,.6)))<1e-8)
+stopifnot(max(abs(scored$value$pd-c(.2,.6)))<1e-8,max(abs(scored$value$log_odds-scored$value$intercept-rowSums(scored$value$feature_contributions)))<1e-14,
+ abs(scorecard$model$parameters$coefficients[[1]]-log(.2/.8))<1e-7,scored$value$reference_contributions==0)
+scaled<-scale_score_points(c(-log(50),-log(50)+log(2)),600,50,20,"nondefault_over_default","higher_is_safer")
+stopifnot(max(abs(scaled$value$points-c(600,580)))<1e-12)
+inverse<-scaled$value$inverse
+stopifnot(max(abs(plogis((scaled$value$points-inverse$score_intercept)/inverse$score_slope_per_default_log_odds)-plogis(c(-log(50),-log(50)+log(2)))))<1e-14)
+coeff<-list(management=list(weak=.8,neutral=.2,strong=-.2))
+adjusted<-apply_qualitative_adjustments(list(management="weak"),coeff,list(management="neutral"),-2,"log_odds")
+stopifnot(abs(adjusted$value$total_adjustment-.6)<1e-14,abs(adjusted$value$adjusted_pd-plogis(-1.4))<1e-14)
+reasons<-scorecard_reason_codes(list(b=2,a=2,c=-1),list(a=0,b=0,c=0),list(adverse_direction="positive",max_reasons=1,reason_codes=list(a="A",b="B",c="C")))
+stopifnot(reasons$value$reasons[[1]]$feature=="a",reasons$value$total_difference==3,reasons$value$unreported_difference==1)
+expect_code<-function(expr,code){actual<-tryCatch({force(expr);"NO_ERROR"},creditratingsystem_error=function(e)e$code);stopifnot(identical(actual,code))}
+expect_code(apply_qualitative_adjustments(structure(list(),names=character()),coeff,list(management="neutral"),-2,"log_odds"),"MISSING_INPUT")
+expect_code(apply_qualitative_adjustments(list(management="weak"),coeff,list(management="neutral"),3,"rating_notches"),"INCOMPATIBLE_UNIT")
+expect_code(fit_scorecard(matrix(c(0,0,1,1),ncol=1),c(0,0,1,1),"x",list(neutral_profile=0,feature_kinds="expert"),target,training,"separated","1"),"SEPARATION")
+registry<-register_rating_model_version(NULL,list(model=scorecard$model,dependencies=structure(list(),names=character()),configuration=structure(list(),names=character())),list(model_id='scorecard',model_version='1',registered_at='2025-01-01'))
+request<-list(row_id='r',known_at='2025-01-02',model_id='scorecard',model_version='1',model_hash=registry$value$entries[[1]]$model_hash,
+ input=list(X=list(list(0),list(1)),feature_order=list('x')),recipe=list(method='pd_model',version='1.0',parameters=list(expected_target=target)))
+batch<-rate_subject_batch(list(request),registry,'batch','2025-01-02')$value
+stopifnot(batch$rows[[1]]$status=='OK',max(abs(unlist(batch$rows[[1]]$value)-c(.2,.6)))<1e-8,
+ replay_assessment_history(list(request),registry,batch$rows,'2025-01-02')$value$status=='REPRODUCED')
+request$recipe$method<-'binary_glm'
+stopifnot(rate_subject_batch(list(request),registry,'wrong-recipe','2025-01-02')$value$rows[[1]]$error_code=='RATING_RECIPE')

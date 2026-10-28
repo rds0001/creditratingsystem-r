@@ -1,0 +1,6 @@
+library(creditratingsystem)
+source(system.file("examples/wholesale_corporate_lifecycle.R",package="creditratingsystem"))
+result<-run_wholesale_corporate_lifecycle()
+stopifnot(result$governance$replay_after_new_champion=='REPRODUCED',result$governance$tampered_replay=='NOT_REPRODUCIBLE',abs(result$closed_workout$economic_lgd-.3)<1e-12,is.null(result$incomplete_workout$economic_lgd))
+stopifnot(identical(unname(vapply(result$drift_sources,function(x)x$defaults,numeric(1))),c(2,3,4)))
+for(language in c('python','r'))stopifnot(nchar(result$frozen_workout_replay[[language]]$model_hash)==64,abs(result$frozen_workout_replay[[language]]$forecast$episodes[[1]]$expected_final_lgd-.33116041251551276)<1e-7)

@@ -1,0 +1,16 @@
+if(!exists('fit_binary_glm'))library(creditratingsystem)
+rj_test_path<-system.file('examples','retail_application_journey.R',package='creditratingsystem');if(!nzchar(rj_test_path))rj_test_path<-'creditratingsystem-r/examples/retail_application_journey.R';source(rj_test_path)
+rj_test_data<-jsonlite::read_json(rj_resource('retail_application_journey.json'),simplifyVector=FALSE);rj_test_product<-'RETAIL_UNSECURED_INSTALLMENT';rj_test_case<-rj_test_data$products[[rj_test_product]]
+rj_test_fit<-rj_fit(rj_test_product,rj_test_case,rj_test_data$target)
+stopifnot(max(abs(unlist(rj_test_fit$model$parameters$coefficients)-c(0,log(3))))<1e-8,max(abs(unlist(rj_test_fit$fit_predictions)-c(.25,.75)))<1e-8,abs(rj_test_fit$calibrator$parameters$intercept)<1e-8,abs(rj_test_fit$calibrator$parameters$slope-1)<1e-8)
+rj_test_labels<-build_application_targets(rj_test_case$applications,rj_test_case$decisions,rj_test_case$bookings,rj_test_case$defaults,rj_test_case$exits,30,rj_test_data$evaluation_cutoff)$value
+stopifnot(rj_test_labels[[1]]$target==0,rj_test_labels[[2]]$target==1,all(vapply(rj_test_labels[3:5],function(x)is.null(x$target),logical(1))))
+rj_test_source<-rj_sources(rj_test_data);stopifnot(all(vapply(rj_test_source$audits,function(x)x$result$decision$status=='PASS',logical(1))),!any(startsWith(rj_vec(rj_test_source$rows,'release_id'),'late-')))
+rj_test_budget<-rj_capacity(rj_test_case$applications[[1]],rj_test_case$households[[1]],rj_test_case$terms,rj_one(rj_test_source$rows,'record_id',rj_test_case$applications[[1]]$application_id));stopifnot(rj_test_budget$residual$minimum==700,rj_test_budget$stress$periods[[1]]$residual==580)
+stopifnot(identical(rj_payment(rj_test_data$products$RETAIL_AUTO_LOAN$terms),c(rep(50,9),550)),all(rj_payment(rj_test_data$products$RETAIL_EDUCATION_LOAN$terms)==c(0,0,rep(125,8))))
+rj_test_bad<-rj_test_case;rj_test_bad$training[[1]]$feature_known_at<-'2024-01-01';stopifnot(inherits(try(rj_fit(rj_test_product,rj_test_bad,rj_test_data$target),silent=TRUE),'try-error'))
+if(identical(Sys.getenv('CREDITRATINGSYSTEM_EXTENDED_TESTS'),'true')){
+ rj_test_all<-run_retail_application_journey(return_artifacts=TRUE);rj_verify(rj_test_all);rj_test_one<-rj_test_all$products[[rj_test_product]]
+ stopifnot(rj_test_one$monitoring$monitor[[1]]$metrics$n==2,abs(rj_test_one$monitoring$monitor[[1]]$metrics$brier-1/16)<1e-10,rj_test_one$policy_validation$result$metrics$factual$funded_rate==.6,rj_test_one$affordability_validation$result$metrics$factual_scheduled_minus_paid$bias==50)
+ rj_test_replay<-rj_test_one$monitoring$replay_inputs;rj_test_replay$replayed_checkpoints[[1]]$state$ratings[[1]]$row_id<-'unrelated-account';stopifnot(do.call(replay_consistency,rj_test_replay)$value$decision$status!='PASS')
+}

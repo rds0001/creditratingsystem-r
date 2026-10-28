@@ -1,0 +1,11 @@
+library(creditratingsystem)
+source(system.file('examples/mortgage_household_review.R',package='creditratingsystem'))
+raw<-run_mortgage_household_review(return_artifacts=TRUE)
+stopifnot(raw$joint_application$monthly_income==5000,raw$joint_application$monthly_debt_service==1000,raw$collateral$cltv==2/3,raw$governance$negative_applicability$status=='NOT_APPLICABLE')
+stopifnot(raw$household$households[[1]]$total_budget_debt_service==900,raw$closed_workout$economic_loss==32000,raw$pool$metrics$overall_count$brier==.5625,raw$pool$coverage$input_count==1,raw$affordability$metrics$factual_scheduled_minus_paid$n==0,length(raw$affordability$missing_payment_periods)>0,raw$replay$decision$status=='PASS',identical(raw$lifecycle$application_and_monitoring,raw$retail$summary))
+c<-raw$cohort_inputs;c$application_targets[[3]]$target<-0;c$application_targets[[3]]$label_observed<-TRUE;c$application_targets[[3]]$label_origin<-'PSEUDO'
+stopifnot(do.call(validate_retail_cohort,c)$value$decision$status=='FAIL')
+a<-raw$affordability_inputs;a$economic_evidence[[1]]$terms$monthly_amount<-a$economic_evidence[[1]]$terms$monthly_amount*2
+stopifnot(do.call(affordability_stress_backtest,a)$value$decision$status=='BLOCKED')
+r<-raw$replay_inputs;r$replayed_checkpoints[[1]]$state$ratings[[1]]$value$pd<-r$replayed_checkpoints[[1]]$state$ratings[[1]]$value$pd+.01
+stopifnot(do.call(replay_consistency,r)$value$decision$status=='BLOCKED')

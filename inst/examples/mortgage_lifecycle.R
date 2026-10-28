@@ -1,0 +1,32 @@
+# Installed synthetic mortgage lifecycle. No real contract changes are executed.
+if(!exists("build_account_month_panel"))library(creditratingsystem)
+run_mortgage_lifecycle<-function(data=NULL,evidence_data=NULL,variant_data=NULL,risk_data=NULL){
+ if(is.null(data))data<-jsonlite::fromJSON(system.file("extdata/mortgage_lifecycle.json",package="creditratingsystem"),simplifyVector=FALSE)
+ if(!exists("run_retail_slice"))source(system.file("examples/retail_slice.R",package="creditratingsystem"))
+ lifecycle<-run_retail_slice(data=data)
+ if(!exists("run_mortgage_evidence"))source(system.file("examples/mortgage_evidence.R",package="creditratingsystem"))
+ if(!exists("run_mortgage_variants"))source(system.file("examples/mortgage_variants.R",package="creditratingsystem"))
+ if(!exists("run_mortgage_risk"))source(system.file("examples/mortgage_risk.R",package="creditratingsystem"))
+ evidence<-run_mortgage_evidence(evidence_data);variants<-run_mortgage_variants(variant_data);risk<-run_mortgage_risk(risk_data)
+ delinquency<-do.call(compute_days_past_due,data$delinquency)$value
+ stopifnot(delinquency$dpd==30,delinquency$past_due_amount==900)
+ a<-data$arrangement;a$discount_factors<-unlist(a$discount_factors)
+ for(n in c("baseline","candidate"))for(k in c("payments","period_interest_rates","new_fees","servicing_costs","receipt_fractions"))a[[n]][[k]]<-unlist(a[[n]][[k]])
+ a$affordability_paths<-lapply(a$affordability_paths,function(x){x$available_cash<-unlist(x$available_cash);x})
+ arrangement<-do.call(simulate_repayment_arrangement,a)$value
+ stopifnot(all(unlist(arrangement$baseline$affordability[[1]]$residual_cash)==c(-1800,-1800)),all(unlist(arrangement$candidate$affordability[[1]]$residual_cash)==c(200,200)),!arrangement$contract_changed,!arrangement$default_status_changed)
+ stopifnot(abs(arrangement$candidate$schedule[[1]]$closing_principal-94389)<1e-8,abs(arrangement$candidate$remaining_claim-93577.778)<1e-8)
+ recovery<-do.call(discount_recoveries,data$realized_recovery)
+ common<-list(ead_at_default=data$default_ead,discounted_net_recoveries=recovery,default_date=data$realized_recovery$default_date,evaluation_cutoff=data$realized_recovery$evaluation_cutoff,currency="EUR")
+ closed<-do.call(workout_lgd,c(common,list(episode_status="CLOSED")))$value
+ incomplete<-do.call(workout_lgd,c(common,list(episode_status="OPEN")))$value
+ stopifnot(closed$economic_loss==32000,abs(closed$economic_lgd-32/95)<1e-12,is.null(incomplete$economic_lgd),!incomplete$complete)
+ behavior<-data$behavioral
+ panel<-build_account_month_panel(behavior$accounts,behavior$statements,behavior$events,observation_dates=behavior$observation_dates)$value$accounts
+ panel[[2]]$state<-evidence$delinquency_state$state
+ vintage<-build_vintage_performance(behavior$accounts,panel,behavior$events,months_on_book=list(0,6,7),evaluation_cutoff="2025-03-01",coverage=behavior$coverage,default_event="DEFAULT",delinquency_states=list("DELINQUENT"),exit_events=list("CLOSED"))$value
+ stopifnot(all(vapply(vintage,function(x)x$cumulative_default_rate,numeric(1))==c(0,0,1)),all(vapply(vintage,function(x)x$delinquency_stock_rate,numeric(1))==c(0,1,0)))
+ exit_panel<-do.call(build_account_month_panel,data$closed_account)$value
+ stopifnot(!exit_panel$accounts[[1]]$at_risk)
+ list(product="residential_mortgage",data_origin="SYNTHETIC",application_and_monitoring=lifecycle,evidence=evidence,variants=variants,risk=risk,delinquency=delinquency,proposed_restructuring=arrangement,realized_recovery=recovery$value,closed_workout=closed,incomplete_workout=incomplete,exit_panel=exit_panel,vintage=vintage)
+}

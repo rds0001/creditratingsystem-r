@@ -1,0 +1,8 @@
+if(!exists('fit_cause_specific_hazards',mode='function'))library(creditratingsystem)
+ep<-system.file('examples/lifetime_risk_review.R',package='creditratingsystem');if(!nzchar(ep))ep<-'creditratingsystem-r/examples/lifetime_risk_review.R';source(ep)
+dp<-system.file('extdata/lifetime_risk_review.json',package='creditratingsystem');if(!nzchar(dp))dp<-'creditratingsystem-r/inst/extdata/lifetime_risk_review.json';d<-jsonlite::fromJSON(dp,simplifyVector=FALSE)
+r<-run_lifetime_risk_review(d);p<-unlist(r$cause_specific_curves$cumulative_incidence$default)
+stopifnot(p[3]<r$ignored_prepayment_probability,r$ead_validation$coverage$included_count==3,r$lgd_validation$coverage$included_count==2,r$survival_validation$metrics$by_horizon[[3]]$censored_by_horizon==1,!is.null(r$open_workout$episodes[[1]]$expected_final_lgd),is.null(r$unidentified_tail$episodes[[1]]$expected_final_lgd),abs(tail(unlist(r$fine_gray_curves$cumulative_incidence$default),1)-(1-exp(-1/3.75-1/2.75)))<1e-12)
+x<-d;x$training$known_at<-'2025-01-01';stopifnot(inherits(try(run_lifetime_risk_review(x),silent=TRUE),'try-error'))
+x<-d;x$holdout[[4]]$coverage_end<-NULL;stopifnot(inherits(try(run_lifetime_risk_review(x),silent=TRUE),'try-error'))
+x<-d;x$holdout[[3]]$lgd<--999;y<-run_lifetime_risk_review(x,FALSE);stopifnot(y$lgd_validation$coverage$included_count==2,abs(y$lgd_validation$metrics$overall$ead_weighted$bias-4/180)<1e-12)

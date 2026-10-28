@@ -1,0 +1,11 @@
+/dist/
+*.Rcheck/
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+.Renviron
+.env
+.env.*
+.DS_Store
+Thumbs.db

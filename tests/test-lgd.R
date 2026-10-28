@@ -1,0 +1,18 @@
+if(!exists('discount_recoveries'))library(creditratingsystem)
+lgd_error<-function(code,expr){e<-tryCatch({force(expr);NULL},error=identity);stopifnot(inherits(e,'creditratingsystem_error'),identical(e$code,code))}
+lgd_near<-function(x,y,tol=1e-12)stopifnot(isTRUE(all.equal(x,y,tolerance=tol,check.attributes=FALSE)))
+lgd_case<-function(){dates<-c('2024-02-01','2024-03-01');list(cashflows=list(list(cashflow_id='r1',cashflow_date=dates[1],known_at=dates[1],currency='EUR',kind='RECOVERY',amount=80),list(cashflow_id='c1',cashflow_date=dates[2],known_at=dates[2],currency='USD',kind='DIRECT_COST',amount=5),list(cashflow_id='c2',cashflow_date=dates[2],known_at=dates[2],currency='EUR',kind='INDIRECT_COST',amount=4)),discount_curve=list(anchor_date='2024-01-01',known_at='2024-01-01',discount_basis='USER_SPECIFIED_ECONOMIC_FACTORS',points=list(list(cashflow_date=dates[1],discount_factor=.9),list(cashflow_date=dates[2],discount_factor=.8))),fx_contract=list(reporting_currency='EUR',known_at='2024-03-01',conversion_basis='cashflow_date',rates=list(list(currency='EUR',date=dates[1],rate=1),list(currency='EUR',date=dates[2],rate=1),list(currency='USD',date=dates[2],rate=2))),default_date='2024-01-01',evaluation_cutoff='2024-03-01',reporting_currency='EUR')}
+r<-do.call(discount_recoveries,lgd_case());lgd_near(vapply(r$value$contributions,`[[`,numeric(1),'discounted_contribution'),c(72,-8,-3.2));lgd_near(r$value$discounted_net_recoveries,60.8)
+v<-workout_lgd(100,r,'CLOSED','2024-01-01','2024-03-01','EUR')$value;lgd_near(v$economic_lgd,.392)
+lgd_error('TARGET_MISMATCH',workout_lgd(100,r,'CLOSED','2024-01-01','2024-03-02','EUR'))
+stopifnot(workout_lgd(100,120,'CLOSED','2024-01-01','2024-03-01','EUR')$value$economic_lgd== -.2,workout_lgd(100,-20,'CLOSED','2024-01-01','2024-03-01','EUR')$value$economic_lgd==1.2)
+v<-workout_lgd(100,80,'OPEN','2024-01-01','2024-03-01','EUR')$value;stopifnot(is.null(v$economic_lgd),v$economic_lgd_to_date==.2,!v$complete)
+v<-workout_lgd(0,80,'OPEN','2024-01-01','2024-03-01','EUR')$value;stopifnot(v$economic_loss== -80,is.null(v$economic_lgd_to_date),v$denominator_status=='ZERO_EAD')
+stopifnot(workout_lgd(1e-320,0,'CLOSED','2024-01-01','2024-03-01','EUR')$value$economic_lgd==1)
+a<-lgd_case();for(i in seq_along(a$discount_curve$points))a$discount_curve$points[[i]]$discount_factor<-1;stopifnot(do.call(discount_recoveries,a)$value$discounted_net_recoveries==66)
+a<-lgd_case();a$cashflows[[1]]$known_at<-'2024-04-01';v<-do.call(discount_recoveries,a)$value;lgd_near(v$discounted_net_recoveries,-11.2);stopifnot(v$excluded_cashflows[[1]]$reason=='NOT_YET_KNOWN')
+a$cashflows[[4]]<-a$cashflows[[1]];a$cashflows[[4]]$cashflow_id<-'future';a$cashflows[[4]]$cashflow_date<-a$cashflows[[4]]$known_at<-'2024-06-01';stopifnot(do.call(discount_recoveries,a)$value$excluded_cashflows[[2]]$reason=='FUTURE_CASHFLOW')
+a<-lgd_case();a$discount_curve$points<-a$discount_curve$points[1];lgd_error('MISSING_DISCOUNT',do.call(discount_recoveries,a))
+a<-lgd_case();a$cashflows[[4]]<-a$cashflows[[1]];lgd_error('DATA_DUPLICATE',do.call(discount_recoveries,a))
+a<-lgd_case();a$discount_curve$known_at<-'2024-04-01';lgd_error('RECOVERY_CONTRACT',do.call(discount_recoveries,a))
+cat('LGD native cashflow, raw loss and open-workout cases passed\n')

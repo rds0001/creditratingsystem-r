@@ -1,0 +1,16 @@
+library(creditratingsystem)
+source(system.file('examples/input_lineage.R',package='creditratingsystem'))
+x<-run_input_lineage();old<-x$snapshots$original;new<-x$snapshots$corrected
+stopifnot(length(old$rows)==31,old$audit$node_totals$joined$amounts$balance==49600,old$audit$node_totals$joined$total_weight==31,old$rows[[1]]$income==1010,new$rows[[1]]$income==1110,identical(old$archive_sha256,new$archive_sha256),old$selected_snapshot_hash!=new$selected_snapshot_hash,x$original_replay_exact)
+bad<-old$audit_inputs;bad$nodes[[3]]$records[[1]]$weight<-2;bad$nodes[[3]]$records[[1]]$amounts$balance<-200
+v<-do.call(validate_source_lineage,bad)$value
+stopifnot(all(c('JOIN_WEIGHT_MULTIPLICATION','JOIN_AMOUNT_MULTIPLICATION','RECONCILIATION_WEIGHT','RECONCILIATION_AMOUNT')%in%names(v$violation_counts)))
+bad<-old$audit_inputs;bad$nodes[[2]]$available_at<-'2025-02-01';bad$nodes[[2]]$semantic_role<-'OUTCOME'
+v<-do.call(validate_source_lineage,bad)$value
+stopifnot(all(c('SOURCE_USE_LOOKAHEAD','OUTCOME_IN_PREDICTIVE_PATH')%in%names(v$violation_counts)))
+cfg<-jsonlite::fromJSON(system.file('extdata/input_lineage.json',package='creditratingsystem'),simplifyVector=FALSE)
+l<-read_local_dataset(system.file('extdata/lineage_accounts.csv',package='creditratingsystem'),cfg$left_schema)$value
+r<-read_local_dataset(system.file('extdata/lineage_releases.csv',package='creditratingsystem'),cfg$right_schema)$value
+other<-r[[1]];other$release_id<-'other-release';other$income<-9999
+err<-tryCatch(join_as_of(l,c(r,list(other))),creditratingsystem_error=function(e)e)
+stopifnot(inherits(err,'creditratingsystem_error'),err$code=='DATA_AMBIGUOUS_JOIN')

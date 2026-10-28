@@ -1,0 +1,35 @@
+# Native fits of explicitly prior-observed default and exit cohorts.
+if(!exists('fit_aft_model'))library(creditratingsystem)
+run_retail_exit_models<-function(data=NULL,verify_reference=TRUE){
+ if(is.null(data))data<-jsonlite::fromJSON(system.file('extdata/retail_exit_models.json',package='creditratingsystem'),simplifyVector=FALSE)
+ out<-list()
+ for(product in names(data$cases)){
+  z<-data$cases[[product]];s<-z$step_days;target<-z$target
+  meta<-list(target=target,training=z$training,model_id=paste0(product,'-events'),model_version='1')
+  paths<-list(list(path_id=product,start=0,stop=4*s,covariates=list(),stratum='all',covariate_time=0))
+  cause<-do.call(fit_cause_specific_hazards,c(list(start_stop_panel=z$cause_panel,X=matrix(numeric(),nrow=length(z$cause_panel),ncol=0),event_types=z$cause_events,feature_order=list(),causes=list('default','exit'),ties='breslow'),meta))
+  competing<-predict_event_curves(cause,paths,c(0,s,2*s),feature_order=list(),target=target)$value
+  fine<-do.call(fit_fine_gray,c(list(event_times=unlist(z$fine_gray_times),event_types=z$fine_gray_events,X=matrix(numeric(),nrow=length(z$fine_gray_times),ncol=0),cause_of_interest='default',feature_order=list(),censoring_spec=list(estimator='kaplan_meier',independence_assumption='independent_within_censoring_group')),meta))
+  subdistribution<-predict_event_curves(fine,paths,c(0,3*s,4*s),feature_order=list(),target=target)$value
+  grouped<-do.call(fit_discrete_hazard,c(list(person_period_panel=z$grouped_panel,X=matrix(numeric(),nrow=length(z$grouped_panel),ncol=0),feature_order=list(),period_grid=c(0,s),link='cloglog',partial_period_policy='exclude_censored'),meta))
+  discrete<-predict_event_curves(grouped,paths,c(0,s/2,s),feature_order=list(),target=target)$value
+  exit_target<-target;exit_target$event<-'exit';durations<-unlist(z$exit_durations)
+  aft<-fit_aft_model(durations,rep(1,length(durations)),matrix(numeric(),nrow=length(durations),ncol=0),feature_order=list(),distribution='lognormal',target=exit_target,training=z$training,model_id=paste0(product,'-exit-time'),model_version='1')
+  aft_prediction<-predict_event_curves(aft,paths,c(s/2,s,2*s),feature_order=list(),target=exit_target)$value
+  logs<-log(durations);mu<-mean(logs);sigma<-sqrt(mean((logs-mu)^2))
+  oracle_ll<-sum(-logs-log(sigma)-.5*log(2*pi)-.5*((logs-mu)/sigma)^2)
+  fit_gap<-abs(aft$diagnostics$log_likelihood-oracle_ll)
+  stopifnot(fit_gap<1e-7)
+  oracle_sf<-pnorm((log(c(s/2,s,2*s))-mu)/sigma,lower.tail=FALSE)
+  stopifnot(max(abs(oracle_sf-unlist(aft_prediction$curves[[1]]$survival)))<1e-5)
+  if(verify_reference){
+   cf<-competing$curves[[1]]
+   stopifnot(abs(cf$cumulative_incidence$default[[2]]-(1-exp(-3/8))/3)<1e-12,abs(cf$cumulative_incidence$exit[[2]]-2*(1-exp(-3/8))/3)<1e-12)
+   stopifnot(abs(cf$survival[[2]]+sum(vapply(cf$cumulative_incidence,function(x)x[[2]],numeric(1)))-1)<1e-12)
+   stopifnot(abs(subdistribution$curves[[1]]$cumulative_incidence$default[[3]]-(1-exp(-1/3.75-1/2.75)))<1e-12)
+   stopifnot(max(abs(unlist(discrete$curves[[1]]$survival)-c(1,sqrt(.8),.8)))<1e-10)
+  }
+  out[[product]]<-list(time_unit='days',interpretation=z$interpretation,competing=competing,fine_gray=subdistribution,discrete=discrete,aft=list(coefficients=as.list(aft$model$parameters$coefficients),log_time_scale=aft$model$parameters$log_time_scale,prediction=aft_prediction,closed_form_coefficients=list(mu),closed_form_scale=sigma,likelihood_oracle_pass=TRUE))
+ }
+ list(data_origin='SYNTHETIC',products=out,training_known_at='2023-12-31')
+}

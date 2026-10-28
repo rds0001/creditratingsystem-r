@@ -1,0 +1,5 @@
+library(creditratingsystem)
+source(system.file('examples/specialized_portfolio_review.R',package='creditratingsystem'))
+r<-run_specialized_portfolio_review()
+stopifnot(length(r$prepared_portfolio$positions)==5,length(r$exposures)==5)
+for(exposure in r$exposures)stopifnot(exposure$before$schedule[[1]]$conditional_ead>exposure$after$schedule[[1]]$conditional_ead)

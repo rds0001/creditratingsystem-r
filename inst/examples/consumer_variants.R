@@ -1,0 +1,21 @@
+# Consumer input history, confirmed refinance and full repayment contracts.
+if(!exists("build_application_snapshot"))library(creditratingsystem)
+run_consumer_variants<-function(data=NULL,verify_reference=TRUE){
+ if(is.null(data))data<-jsonlite::fromJSON(system.file("extdata/consumer_variants.json",package="creditratingsystem"),simplifyVector=FALSE)
+ snapshots<-do.call(build_application_snapshot,data$snapshots)$value
+ c<-data$consolidation
+ consolidation<-lapply(c$cutoffs,function(date){
+  graph<-build_customer_household_graph(c$entities,c$relationships,as_of=date,information_cutoff=date)
+  result<-aggregate_household_obligations(c$obligations,graph,c$coverage,currency="EUR",period="month",guarantee_budget_policy="exclude")
+  list(as_of=date,value=result$value)
+ })
+ a<-data$prepayment;a$annual_interest_rates<-unlist(a$annual_interest_rates)
+ prepayment<-do.call(exposure_schedule,a)$value
+ labels<-do.call(build_application_targets,data$labels)$value
+ if(verify_reference){
+  stopifnot(identical(unlist(snapshots[[1]]$missing_features,use.names=FALSE),"internal_arrears"),is.null(snapshots[[1]]$features$internal_arrears),snapshots[[2]]$features$internal_arrears==0,length(snapshots[[2]]$missing_features)==0)
+  stopifnot(all(vapply(consolidation,function(x)x$value$households[[1]]$total_budget_debt_service,numeric(1))==c(500,850,350)),all(vapply(prepayment$schedule,function(x)x$conditional_ead,numeric(1))==0))
+  stopifnot(labels[[1]]$target==1,labels[[2]]$target==1,is.null(labels[[3]]$target),labels[[1]]$event_id=="first_payment_default",labels[[2]]$event_id=="later_default",is.null(labels[[3]]$event_id))
+ }
+ list(data_origin=data$data_origin,product=data$product,snapshots=snapshots,consolidation=consolidation,prepayment=prepayment,labels=labels)
+}

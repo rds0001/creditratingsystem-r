@@ -1,0 +1,8 @@
+library(creditratingsystem)
+target<-list(event='default',horizon=1,time_unit='years',probability_measure='PHYSICAL',conditioning='performing')
+meta<-list(target=target,training=list(data_fingerprint='dispatch',split_id='train',known_at='2024-01-01',data_origin='SYNTHETIC'),model_id='dispatch',model_version='1')
+model<-do.call(fit_naive_bayes_pd,c(list(X_train=matrix(c('a','b','a','b'),ncol=1),y_train=c(0,0,1,1),feature_order='x',feature_types='categorical',variant='categorical'),meta))
+p<-predict_pd(model,matrix('a',1),feature_order='x',expected_target=target);stopifnot(unlist(p$value)==.5,p$provenance$data_origin=='SYNTHETIC')
+e<-tryCatch(predict_pd(model,matrix('a',1),feature_order='x',expected_target=target,context=list(probability_measure='RISK_NEUTRAL')),error=identity);stopifnot(inherits(e,'creditratingsystem_TARGET_MISMATCH'))
+svm<-do.call(fit_svm_score,c(list(X_train=matrix(c(-1,1),ncol=1),y_train=c(0,1),feature_order='x',kernel='linear',C=1),meta))
+e<-tryCatch(predict_pd(svm,matrix(0,1),feature_order='x',expected_target=target),error=identity);stopifnot(inherits(e,'creditratingsystem_UNCALIBRATED_SCORE'))

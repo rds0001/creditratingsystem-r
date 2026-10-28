@@ -1,0 +1,5 @@
+^(?!(DESCRIPTION|NAMESPACE|LICENSE|NOTICE|README[.]md|R(/.*)?|man(/.*)?|tests(/.*)?|vignettes(/.*)?|inst(/.*)?|data(/.*)?|examples(/.*)?)$).*$
+^examples$
+
+^inst/extdata/syn_s($|/)
+^LICENSE$

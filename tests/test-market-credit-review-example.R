@@ -1,0 +1,17 @@
+library(creditratingsystem)
+source(system.file('examples/market_credit_review.R',package='creditratingsystem'))
+d<-jsonlite::fromJSON(system.file('extdata/market_credit_review.json',package='creditratingsystem'),simplifyVector=FALSE)
+v<-run_market_credit_review(d,return_artifacts=TRUE)
+stopifnot(identical(vapply(v$assessment_components,function(c)c$definition$probability_measure,character(1)),c('PHYSICAL','RISK_NEUTRAL')),v$bridge$physical_pd>v$bridge$q_pd,v$identification$rank_without_recovery==2,v$identification$rank_with_recovery==3,v$bridge$warmup_count==100)
+restored<-jsonlite::fromJSON(jsonlite::toJSON(v$artifacts$bridge,auto_unbox=TRUE,null='null',digits=17),simplifyVector=FALSE)
+p<-predict_pd(restored,matrix(c(.01,.05),ncol=1),feature_order='q_pd',expected_target=d$bridge_contract$target)$value
+stopifnot(max(abs(unlist(p)-c(.02,.1)))<1e-10)
+wrong<-restored$target;wrong$probability_measure<-'RISK_NEUTRAL'
+err<-tryCatch(predict_pd(restored,matrix(.01,ncol=1),feature_order='q_pd',expected_target=wrong),creditratingsystem_error=function(e)e)
+stopifnot(inherits(err,'creditratingsystem_error'))
+rows<-d$bridge_observations;rows[[1]]$market_curve_known_at<-'2019-01-01'
+err<-tryCatch(fit_market_to_physical_pd_bridge(rows,'q_pd',d$bridge_contract,d$folds,model_id='bridge',model_version='1'),creditratingsystem_error=function(e)e)
+stopifnot(inherits(err,'creditratingsystem_error'),err$code=='LOOKAHEAD_BIAS')
+rows<-d$bridge_observations;rows[[101]]$entity_id<-rows[[1]]$entity_id
+err<-tryCatch(fit_market_to_physical_pd_bridge(rows,'q_pd',d$bridge_contract,d$folds,model_id='bridge',model_version='1'),creditratingsystem_error=function(e)e)
+stopifnot(inherits(err,'creditratingsystem_error'),err$code=='LEAKAGE')

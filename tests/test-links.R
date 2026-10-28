@@ -1,0 +1,53 @@
+if(!exists('build_entity_graph'))library(creditratingsystem)
+lk_error<-function(code,expr){e<-tryCatch({force(expr);NULL},error=identity);stopifnot(inherits(e,'creditratingsystem_error'),identical(e$code,code))}
+lk_near<-function(a,b)stopifnot(isTRUE(all.equal(as.numeric(unlist(a)),b,tolerance=1e-9)))
+lk_policy<-list(policy_id='relations',version='1',edge_types=list('OWNERSHIP','CONTROL','CROSS_DEFAULT'))
+lk_control<-list(policy_id='control',version='1',control_edge_types=list('CONTROL'),ownership_threshold=.5,ownership_inclusive=FALSE)
+lk_target<-list(event='default',horizon=1,time_unit='years',probability_measure='PHYSICAL',conditioning='performing')
+lk_edge<-function(i,a,b,kind='OWNERSHIP'){x<-list(edge_id=i,source_id=a,target_id=b,edge_type=kind,valid_from='2024-01-01',valid_until=NULL,known_at='2024-01-01',evidence_reference='test-contract');if(kind=='OWNERSHIP')x$ownership_fraction<-.6;x}
+lk_graph<-function(edges,as_of='2024-04-01',known_at='2024-04-01')build_entity_graph(lapply(c('A','B','C','D'),function(x)list(entity_id=x)),edges,lk_policy,as_of,known_at)
+e1<-lk_edge('ab','A','B');e1$valid_until<-'2024-07-01';e2<-lk_edge('db','D','B');e2$valid_from<-'2024-07-01';e2$known_at<-'2024-06-01'
+g<-lk_graph(list(e1,e2,lk_edge('bc','B','C')));stopifnot(resolve_parent_links(g,lk_control)$value$parents[[3]]$ultimate_parent=='A')
+later<-lk_graph(list(e1,e2,lk_edge('bc','B','C')),'2024-07-01','2024-07-01');stopifnot(resolve_parent_links(later,lk_control)$value$parents[[3]]$ultimate_parent=='D')
+cycle<-lk_graph(list(lk_edge('ab','A','B'),lk_edge('ba','B','A')));stopifnot(resolve_parent_links(cycle,lk_control)$value$parents[[1]]$status=='CONTROL_CYCLE')
+bad<-g$value;bad$edges[[1]]$source_id<-'D';lk_error('LINK_INTEGRITY',resolve_parent_links(bad,lk_control))
+g<-lk_graph(list(lk_edge('ab','A','B','CROSS_DEFAULT'),lk_edge('ba','B','A','CROSS_DEFAULT'),lk_edge('bc','B','C','CROSS_DEFAULT'),lk_edge('cb','C','B','CROSS_DEFAULT')))
+dp<-list(policy_id='defaults',version='1',edge_types=list('CROSS_DEFAULT'),direction_policy='mutual_only',transitive=TRUE)
+r<-assign_default_groups(g,dp,list(list(facility_id='f',entity_id='A')))$value;stopifnot(identical(sort(vapply(r$groups,function(x)length(x$members),integer(1))),c(1L,3L)))
+dp$transitive<-FALSE;r<-assign_default_groups(g,dp,list())$value;stopifnot(r$conflicts[[1]]$status=='NONTRANSITIVE_OVERLAP')
+child<-list(entity_id='B',pd=.1,stage='STANDALONE',target=lk_target,applied_effects=list());parent<-child;parent$entity_id<-'A';parent$pd<-.2
+state<-list(available_capacity=100,willingness_given_state=.5,success_given_willing_and_funded=1,support_permitted=TRUE,evidence_reference='conditional-support');joint<-state;joint$available_capacity<-0;joint$support_permitted<-FALSE
+support<-list(effect_id='support-A-B',assumption_reference='conditional-tree',currency='EUR',total_capacity=200,reserved_elsewhere=50,allocated_capacity=100,support_required=80,states=list(parent_alive=state,joint_default=joint))
+lk_near(apply_parent_support(child,parent,support,.02)$value$pd,.06);support$states$parent_alive$available_capacity<-70;lk_near(apply_parent_support(child,parent,support,.02)$value$pd,.1)
+claims<-lapply(c('A','B'),function(x)list(claim_id=x,entity_id=x,amount=80,currency='EUR',due_at='2024-12-01',known_at='2024-01-01'))
+guar<-list(guarantee_id='g',guarantor_id='P',currency='EUR',cap=100,cap_used=0,coverage_fraction=1,covered_claim_ids=list('A','B'),valid_from='2024-01-01',valid_until='2025-01-01',known_at='2024-01-01',legally_effective=TRUE,evidence_reference='contract')
+ap<-list(policy_id='allocation',version='1',guarantee_priority=list('g'),claim_priority=list('A','B'),cap_convention='non_reinstating_total')
+a<-allocate_guarantee_coverage(list(guar),claims,ap,'2024-01-01','2024-01-01','EUR');lk_near(lapply(a$value$allocations,function(r)r$covered_amount),c(80,20))
+stopifnot(identical(a$value,allocate_guarantee_coverage(list(guar),rev(claims),ap,'2024-01-01','2024-01-01','EUR')$value))
+claims<-list(list(claim_id='c',entity_id='B',amount=100,currency='EUR',due_at='2024-12-01',known_at='2024-01-01'));guar$cap<-60;guar$covered_claim_ids<-list('c');ap$claim_priority<-list('c')
+a<-allocate_guarantee_coverage(list(guar),claims,ap,'2024-01-01','2024-01-01','EUR');guarantor<-parent;guarantor$entity_id<-'P'
+lc<-list(effect_id='guarantee',currency='EUR',assumption_reference='four-state-table',stage='PRE_GUARANTEE',valuation_date='2024-12-01',states=list(borrower_only=list(loss_before_guarantee=80,payout_fraction=1,evidence_reference='payout'),joint_default=list(loss_before_guarantee=100,payout_fraction=0,evidence_reference='zero-payout')))
+r<-apply_guarantee_risk(child,guarantor,a,'c',lc,.02);lk_near(r$value$expected_loss_before,8.4);lk_near(r$value$expected_loss_after,3.6);stopifnot(r$value$pd==.1);lk_error('LINK_DOUBLE_COUNT',apply_guarantee_risk(r,guarantor,a,'c',lc,.02));lc$effect_id<-'renamed-effect';lk_error('LINK_DOUBLE_COUNT',apply_guarantee_risk(r,guarantor,a,'c',lc,.02))
+# Exact Frechet boundary: a certain borrower event intersects the guarantor event.
+for(qb in c(.1,.2,.7)){
+ cb<-child;cb$pd<-1;gb<-guarantor;gb$pd<-qb
+ rb<-apply_guarantee_risk(cb,gb,a,'c',lc,qb)$value
+ stopifnot(rb$pd==1);lk_near(rb$expected_loss_after,20*(1-qb)+100*qb)
+ lk_error('INVALID_JOINT_PROBABILITY',apply_guarantee_risk(cb,gb,a,'c',lc,qb-1e-7))
+ lk_error('INVALID_JOINT_PROBABILITY',apply_guarantee_risk(cb,gb,a,'c',lc,qb+1e-7))
+}
+scale<-list(schema_version='1.0',scale_id='test',version='1',boundary_convention='left_closed',grades=list(list(grade='A',lower=0,upper=.01,representative_pd=.005,is_default=FALSE),list(grade='B',lower=.01,upper=.1,representative_pd=.05,is_default=FALSE),list(grade='C',lower=.1,upper=1,representative_pd=.5,is_default=FALSE)))
+base<-list(pd=.023,grade='B');rule<-list(rule_id='bound',kind='grade_bounds',best_allowed_grade='A',worst_allowed_grade='B',evidence_reference='policy');stopifnot(apply_rating_constraints(base,scale,list(rule),'representative_on_binding')$value$pd==.023)
+rule$worst_allowed_grade<-'A';r<-apply_rating_constraints(base,scale,list(rule),'preserve_pd');stopifnot(r$value$pd==.023,r$value$grade=='A',!r$value$pd_grade_consistent)
+notch<-list(rule_id='notch',kind='notch_bounds',reference_grade='C',max_improvement=0,max_deterioration=0,evidence_reference='policy');lk_error('RATING_CONFLICT',apply_rating_constraints(base,scale,list(rule,notch),'preserve_pd'))
+base<-list(pd=.02,grade='B',parameters=list(lgd=.4),stage='CALIBRATED');policy<-list(policy_id='override',version='1',require_dual_control=TRUE,targets=list(pd=list(path=list('pd'),kind='probability'),lgd=list(path=list('parameters','lgd'),kind='numeric',minimum=0,maximum=2)))
+request<-list(override_id='o1',target='pd',value=.03,reason='documented new evidence',author='analyst',approved_by='reviewer',recorded_at='2024-01-01',valid_from='2024-01-01',valid_until='2025-01-01')
+r<-apply_override(base,request,policy,'2024-04-01','2024-04-01');stopifnot(r$value$original$pd==.02,r$value$current$pd==.03,base$pd==.02);lk_error('OVERRIDE_DUPLICATE',apply_override(r,request,policy,'2024-04-01','2024-04-01'))
+request2<-request;request2$override_id<-'o2';request2$target<-'lgd';request2$value<-.6;r2<-apply_override(r,request2,policy,'2024-04-01','2024-04-01');stopifnot(r2$value$current$parameters$lgd==.6,length(r2$value$history)==2L,r2$value$history[[2]]$previous_hash==r$value$override_hash)
+expired<-apply_override(base,request,policy,'2025-01-01','2025-01-01');stopifnot(expired$value$status=='EXPIRED',identical(expired$value$current,base));lk_error('OVERRIDE_REPLAY',apply_override(r,request2,policy,'2025-01-01','2025-01-01'))
+assumptions<-list(model='eisenberg_noe',seniority='single_pari_passu',bankruptcy_costs='none',outside_creditor='sink')
+r<-solve_contagion_network(matrix(c(0,50,50,0),2),c(20,10),c(50,50),c('A','B'),'EUR',assumptions,list(list(scenario_id='more-assets',external_assets=c(40,10))))$value
+lk_near(r$base$clearing_payments,c(100/3,80/3));lk_near(r$sensitivity[[1]]$result$clearing_payments,c(60,40));lk_near(r$base$equity,c(0,0))
+cycle<-solve_contagion_network(matrix(c(0,1,1,0),2),c(0,0),c(0,0),c('A','B'),'EUR',assumptions)$value$base;stopifnot(cycle$diagnostics$uniqueness=='MULTIPLE_CLEARINGS');lk_near(cycle$clearing_payments,c(1,1))
+none<-solve_contagion_network(matrix(0,2,2),c(2,3),c(0,0),c('A','B'),'EUR',assumptions)$value$base;lk_near(none$equity,c(2,3));lk_near(none$clearing_payments,c(0,0))
+cat('Native links independent cases PASS\n')

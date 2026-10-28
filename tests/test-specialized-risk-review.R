@@ -1,0 +1,5 @@
+library(creditratingsystem)
+source(system.file('examples/specialized_risk_review.R',package='creditratingsystem'))
+r<-run_specialized_risk_review()
+stopifnot(length(r$journeys)==5)
+for(row in r$journeys)stopifnot(length(row$treatment$feasible_ranking)==2,row$historical_training$known_at=='2021-01-01',row$treatment$profile$identification=='CONDITIONAL_SCENARIO_NOT_CAUSAL')

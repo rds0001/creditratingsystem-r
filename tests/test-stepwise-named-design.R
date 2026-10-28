@@ -1,0 +1,11 @@
+if(!exists('fit_stepwise'))library(creditratingsystem)
+x<-matrix(rep(c(-1,1),each=20),ncol=1,dimnames=list(paste0('bank-row-',1:40),'bank-column-label'))
+y<-c(rep(1,5),rep(0,15),rep(1,15),rep(0,5))
+fit<-function(z)fit_stepwise(z,y,feature_order='signal',candidate_groups=list(signal=list('signal')),direction='forward',criterion='AIC',estimator='GLM')$value
+named<-fit(x);plain<-fit(unname(x))
+stopifnot(identical(named,plain),is.null(names(named$selected_model$coefficients)),identical(unlist(named$selected_model$feature_order),'signal'))
+m<-named$selected_model;p<-plogis(m$intercept+c(-1,1)*unlist(m$coefficients))
+stopifnot(max(abs(p-c(.25,.75)))<1e-8)
+encoded<-jsonlite::toJSON(m,auto_unbox=TRUE,null='null',digits=NA)
+parsed<-jsonlite::fromJSON(encoded,simplifyVector=FALSE)
+stopifnot(is.list(parsed$coefficients),is.null(names(parsed$coefficients)),max(abs(plogis(parsed$intercept+c(-1,1)*unlist(parsed$coefficients))-c(.25,.75)))<1e-8)

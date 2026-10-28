@@ -1,0 +1,9 @@
+library(creditratingsystem)
+source(system.file('examples/retail_transitions.R',package='creditratingsystem'))
+d<-jsonlite::fromJSON(system.file('extdata/retail_transitions.json',package='creditratingsystem'),simplifyVector=FALSE)
+v<-run_retail_transitions(d)$products
+stopifnot(length(v)==12,v$RETAIL_CREDIT_CARD$delinquency$past_due_amount==25,v$RETAIL_CHARGE_CARD$delinquency$past_due_amount==950,v$RETAIL_AUTO_LOAN$arrangement$candidate$remaining_claim==0,v$RETAIL_MICRO_LOAN$treatment$status=='INFEASIBLE',v$RETAIL_AUTO_LOAN$treatment$status=='FEASIBLE')
+d$cases<-d$cases['RETAIL_AUTO_LOAN'];before<-run_retail_transitions(d)$products[[1]]
+d$cases[[1]]$arrangement$affordability_paths[[1]]$available_cash<-list(0,0,0)
+after<-run_retail_transitions(d,verify_reference=FALSE)$products[[1]]
+stopifnot(after$treatment$status=='INFEASIBLE',before$treatment$candidates[[1]]$expected_present_value==after$treatment$candidates[[1]]$expected_present_value)

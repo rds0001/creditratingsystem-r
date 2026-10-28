@@ -1,0 +1,8 @@
+library(creditratingsystem)
+source(system.file('examples/wholesale_sector_risk_review.R',package='creditratingsystem'))
+data<-jsonlite::fromJSON(system.file('extdata/wholesale_sector_risk_review.json',package='creditratingsystem'),simplifyVector=FALSE)
+result<-run_wholesale_sector_risk_review(data)
+for(row in result$open_workout$journeys)stopifnot(abs(row$expected_final_lgd-(1-(1+row$reference$positive_ratio_scale*exp(.025))/3))<1e-10,row$known_discounted_net_cashflows==0)
+changed<-data;changed$review$journeys<-changed$review$journeys[1];changed$open_workout$journeys<-list();changed$review$journeys[[1]]$treatment$treatment_candidates<-rev(changed$review$journeys[[1]]$treatment$treatment_candidates)
+shuffled<-run_wholesale_sector_risk_review(changed)
+stopifnot(identical(shuffled$review$journeys[[1]]$treatment,result$review$journeys[[1]]$treatment))

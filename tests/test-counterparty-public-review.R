@@ -1,0 +1,13 @@
+if(!exists('benchmark_ratings'))library(creditratingsystem)
+example<-system.file('examples/counterparty_public_review.R',package='creditratingsystem')
+if(!nzchar(example))example<-'creditratingsystem-r/examples/counterparty_public_review.R'
+source(example)
+data_path<-system.file('extdata/counterparty_public_review.json',package='creditratingsystem')
+if(nzchar(data_path)){r<-run_counterparty_public_review(return_artifacts=TRUE)}else{
+ d<-jsonlite::fromJSON('creditratingsystem-r/inst/extdata/counterparty_public_review.json',simplifyVector=FALSE)
+ r<-run_counterparty_public_review(d,return_artifacts=TRUE,accounts_path='creditratingsystem-r/inst/extdata/counterparty_positions.csv',releases_path='creditratingsystem-r/inst/extdata/counterparty_releases.csv',helper_path='creditratingsystem-r/examples')
+}
+raw<-r$raw_artifacts
+stopifnot(r$opening_balance==80,r$workout$closed_workout$economic_loss==48,r$benchmark$applicability=='NOT_APPLICABLE',r$benchmark$coverage$included_count==0,r$support_transfer$metrics$by_stage$entity$brier==.25,is.null(r$support_transfer$metrics$by_stage$transfer$brier),r$actual_monitoring[[1]]$metrics$observed_rate==1,r$replay_status=='PASS',r$negative_replay_status=='BLOCKED',identical(do.call(benchmark_ratings,raw$benchmark_inputs)$value,r$benchmark),identical(do.call(support_transfer_backtest,raw$support_inputs)$value,r$support_transfer),identical(do.call(validate_source_lineage,raw$lineage$audit_inputs)$value,raw$lineage$audit))
+bad<-raw$support_inputs;bad$records[[1]]$stage_outcomes$transfer<-list(value=0,known_at='2024-02-15',complete_through='2024-02-14',event_ids=list(),event_times=list())
+stopifnot(inherits(tryCatch(do.call(support_transfer_backtest,bad),error=identity),'error'))

@@ -1,0 +1,11 @@
+if(!exists('fit_penalized_glm',mode='function'))library(creditratingsystem)
+ep<-system.file('examples/behavioral_development.R',package='creditratingsystem');if(!nzchar(ep))ep<-'creditratingsystem-r/examples/behavioral_development.R';source(ep)
+dp<-system.file('extdata/behavioral_development.json',package='creditratingsystem');if(!nzchar(dp))dp<-'creditratingsystem-r/inst/extdata/behavioral_development.json';d<-jsonlite::fromJSON(dp,simplifyVector=FALSE)
+r<-run_behavioral_development(d,return_artifacts=TRUE,measured_fit=FALSE);raw<-r$raw_artifacts
+stopifnot(unlist(r$anchor_pd)==.4,all(vapply(r$grade_calibration$grades,function(r)r$pd,0)==c(.1,.3,.3)),max(abs(vapply(r$pool_parameters,function(r)r$pd$estimate,0)-c(.1,.3)))<1e-12,abs(r$default_count$overall$expected_defaults-7.2)<1e-12,is.null(tail(r$vintage,1)[[1]]$cumulative_default_rate),length(r$predictions)==18)
+replay<-validation_report(raw$report_results,acceptance_policy=raw$report_policy,manifests=raw$validation_report$manifests)$value;stopifnot(identical(content_fingerprint(replay)$value,content_fingerprint(raw$validation_report)$value))
+panel<-.bd_panel(d$holdout);default<-Filter(function(s)s$account_id=='hold0'&&s$as_of=='2024-02-29',panel)[[1]];stopifnot(inherits(try(predict_behavioral_risk(default,raw$model,d$target),silent=TRUE),'try-error'),!is.null(r$default_recovery$episodes[[1]]$expected_final_lgd),r$default_recovery$episodes[[1]]$episode_id=='hold0-default')
+x<-d;x$holdout$accounts[[1]]$customer_id<-'train0';stopifnot(inherits(try(run_behavioral_development(x),silent=TRUE),'try-error'));x<-d;x$pool_training$known_at<-'2025-01-01';stopifnot(inherits(try(run_behavioral_development(x),silent=TRUE),'try-error'))
+if(identical(Sys.getenv('CREDITRATINGSYSTEM_EXTENDED_TESTS'),'true')){
+ z<-run_behavioral_development(d,measured_fit=TRUE,return_artifacts=TRUE);m<-z$measured_fit;x<-unlist(m$training_utilization);y<-unlist(m$training_labels);b<-unlist(m$coefficients);p<-1/(1+exp(-(b[1]+b[2]*x)));stopifnot(b[2]>.5,abs(mean(p-y))<1e-8,abs(mean(x*(p-y))+.1*b[2])<1e-8,length(unique(vapply(z$predictions,function(r)r$pd,0)))>1)
+}

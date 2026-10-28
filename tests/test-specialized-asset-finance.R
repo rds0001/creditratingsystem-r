@@ -1,0 +1,13 @@
+library(creditratingsystem)
+source(system.file('examples/specialized_asset_finance.R',package='creditratingsystem'))
+data<-jsonlite::fromJSON(system.file('extdata/specialized_asset_finance.json',package='creditratingsystem'),simplifyVector=FALSE)
+if(!identical(tolower(Sys.getenv('CREDITRATINGSYSTEM_EXTENDED_TESTS')),'true')){
+ selected<-c('commercial_real_estate-development','project_finance-merchant','aircraft_finance-portfolio','ship_finance-spot_exposure','equipment_leasing-vendor_supported')
+ data$cases<-Filter(function(c)c$case_id%in%selected,data$cases)
+ data$parameter_snapshot$parameters<-data$parameter_snapshot$parameters[selected]
+ data$entity_innovations<-Filter(function(v)any(vapply(selected,function(k)startsWith(v$channel_id,paste0(k,'-')),logical(1))),data$entity_innovations)
+}
+r<-run_specialized_asset_finance(data)
+stopifnot(length(r$variants)==length(data$cases))
+vendor<-r$variants[['equipment_leasing-vendor_supported']]
+stopifnot(abs(vendor$guarantee$expected_loss_after-vendor$guarantee$expected_loss_before)<1e-12,vendor$lessee_pd==.1,r$pit_sampling_contract$conditioning_scope=='PIT',r$ttc_sampling_contract$conditioning_scope=='TTC_STATIONARY')

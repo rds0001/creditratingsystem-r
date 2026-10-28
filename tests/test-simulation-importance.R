@@ -1,0 +1,17 @@
+if(!exists('importance_sample_defaults'))library(creditratingsystem)
+si_contract<-function(design='IID')list(contract_id='is',version='1',evaluator_id='threshold',evaluator_version='1',base_law='INDEPENDENT_STANDARD_NORMAL',proposal='MEAN_SHIFT',all_randomness_in_innovations=TRUE,deterministic_given_innovations=TRUE,sampling_design=design,subject_id='o',currency='EUR',probability_measure='PHYSICAL',event='first_default',conditioning='initially_performing',horizon=1,time_unit='years')
+si_eval<-function(x){d<-x[,1]>0;list(defaulted=d,economic_loss=100*d)}
+r<-importance_sample_defaults(matrix(c(-1,1,2),ncol=1),0,si_eval,si_contract())$value
+stopifnot(abs(r$pd_estimate-2/3)<1e-14,abs(r$expected_loss_estimate-200/3)<1e-12,all(unlist(r$likelihood_ratios)==1),abs(r$pd_mc_standard_error-1/3)<1e-14)
+z<-matrix(c(-1,.2,1,-.4,.2,.7),ncol=2,byrow=TRUE);shift<-c(.5,-.8);x<-sweep(z,2,shift,'+');ratios<-apply(stats::dnorm(x),1,prod)/apply(stats::dnorm(z),1,prod)
+r<-importance_sample_defaults(z,shift,si_eval,si_contract())$value
+stopifnot(max(abs(unlist(r$likelihood_ratios)-ratios))<1e-13,abs(r$pd_estimate-mean(ratios*(x[,1]>0)))<1e-13)
+n<-2048;z<-matrix(stats::qnorm((seq_len(n)-.5)/n),ncol=1)
+r<-importance_sample_defaults(z,3,function(x){d<-x[,1]>3;list(defaulted=d,economic_loss=70*d)},si_contract('DEPENDENT_OR_QMC'))$value
+stopifnot(abs(r$pd_estimate-stats::pnorm(3,lower.tail=FALSE))<1e-8,is.null(r$pd_mc_standard_error),abs(r$expected_loss_estimate-70*r$pd_estimate)<1e-13)
+r<-importance_sample_defaults(matrix(c(-4,-5),ncol=1),1,si_eval,si_contract())$value
+stopifnot(r$zero_proposal_defaults,r$pd_estimate==0,is.null(r$target_zero_default_bound),r$pd_mc_standard_error==0)
+r<-importance_sample_defaults(matrix(-2,ncol=1),1,function(x)list(defaulted=TRUE,economic_loss=10),si_contract())$value
+stopifnot(r$pd_estimate>1,!r$pd_estimate_in_unit_interval)
+stopifnot(inherits(try(importance_sample_defaults(matrix(1,ncol=1),1000,si_eval,si_contract()),silent=TRUE),'try-error'))
+stopifnot(inherits(try(importance_sample_defaults(matrix(-1,ncol=1),0,function(x)list(defaulted=FALSE,economic_loss=1),si_contract()),silent=TRUE),'try-error'))

@@ -1,0 +1,15 @@
+library(creditratingsystem)
+target<-list(event='default',horizon=3,time_unit='years',probability_measure='PHYSICAL',conditioning='defaulted_episode')
+history<-list(
+ list(entity_id='A',start=0,stop=1,from_state='D',to_state='C'),
+ list(entity_id='A',start=1,stop=2,from_state='C',to_state='D'),
+ list(entity_id='A',start=2,stop=3,from_state='D',to_state=NULL),
+ list(entity_id='B',start=0,stop=3,from_state='D',to_state=NULL))
+fit<-estimate_multistate_transitions(history,states=c('D','C'),allowed_transitions=list(c('D','C'),c('C','D')),
+ initial_state='D',target=target,training=list(data_fingerprint='two-account-oracle',split_id='train',known_at='2023-01-01'),model_id='collections-aj',model_version='1')
+model<-fit$model
+model$collections_contract<-list(cure_states=list('C'),default_states=list('D'),supported_actions=list('baseline'),supported_initial_states=list('D','C'),action_interpretation='observational_conditioning')
+episode<-list(episode_id='e',state='D',model_time=0,known_at='2024-01-01',ever_default=TRUE)
+v<-predict_cure_and_redefault(episode,model,list(action_id='baseline',assumption_reference='hand-oracle'),c(0,1,2),
+ matrix(c(0,0,0,100,0,0),nrow=3,byrow=TRUE),target=target,currency='EUR')$value
+stopifnot(identical(unlist(v$sustained_cure_probability),c(0,.5,.5)),identical(unlist(v$cure_then_redefault_probability),c(0,0,.5)),v$expected_recovery==50,v$ever_default,!v$causal_effect_identified)

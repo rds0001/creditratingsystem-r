@@ -1,0 +1,15 @@
+library(creditratingsystem)
+ex_contract<-function(scale='score')list(model_id='frozen',model_version='1',feature_order=list('x','y'),output_scale=scale,deterministic_frozen=TRUE,target=list(event='default',horizon=1,time_unit='years',probability_measure='PHYSICAL',conditioning='performing'))
+ex_error<-function(expr,code){e<-tryCatch(force(expr),error=identity);stopifnot(inherits(e,'creditratingsystem_error'),identical(e$code,code))}
+ex_c<-ex_contract('probability');ex_c$coefficients<-list(2,-3);ex_c$intercept<-1;ex_c$link<-'logit';ex_c$transformed_feature_lineage<-list(x=list('raw_x'),y=list('raw_y'))
+ex_r<-explain_linear_credit_prediction(ex_c,matrix(c(4,2),nrow=1),c(1,1),list(all=list('x','y')),offset=.5,baseline_offset=.25)$value
+stopifnot(ex_r$baseline_linear_predictor==.25,identical(unlist(ex_r$feature_contributions),c(6,-3)),ex_r$group_contributions[[1]][[1]]==3,ex_r$offset_contributions[[1]]==.25,ex_r$linear_predictor[[1]]==3.5,ex_r$reconstruction_residual[[1]]==0,abs(ex_r$response[[1]]-1/(1+exp(-3.5)))<1e-14)
+ex_c$coefficients<-list(1,0);ex_c$intercept<-0;ex_c$link<-'identity';ex_groups<-list(x=list('x'),y=list('y'))
+ex_error(explain_linear_credit_prediction(ex_c,matrix(c(2,0),nrow=1),c(0,0),ex_groups),'EXPLANATION_PREDICTION');ex_error(explain_linear_credit_prediction(ex_c,matrix(c(.5,0),nrow=1),c(2,0),ex_groups),'EXPLANATION_PREDICTION')
+ex_mask<-list(masking='INTERVENTIONAL_EMPIRICAL',reference_id='zero',reference_version='1');ex_background<-list(values=list(list(0,0)),weights=list(1));ex_fn<-function(z)z[,1]*z[,2]
+ex_r<-estimate_credit_shapley_values(ex_fn,c(2,3),ex_background,ex_contract(),ex_groups,ex_mask)$value;stopifnot(identical(unlist(ex_r$values),c(3,3)),ex_r$prediction==6,ex_r$baseline==0)
+ex_mask$permutation_design<-'FIXED_PERMUTATIONS';ex_plan<-list(list('x','y'),list('y','x'));ex_r<-estimate_credit_shapley_values(ex_fn,c(2,3),ex_background,ex_contract(),ex_groups,ex_mask,method='permutation',permutations=ex_plan)$value;stopifnot(identical(unlist(ex_r$values),c(3,3)),is.null(ex_r$permutation_standard_error),identical(unlist(ex_r$permutation_contributions),c(0,6,6,0)))
+ex_mask$permutation_design<-'IID_RANDOM_PERMUTATIONS';ex_r<-estimate_credit_shapley_values(ex_fn,c(2,3),ex_background,ex_contract(),ex_groups,ex_mask,method='permutation',permutations=ex_plan)$value;stopifnot(max(abs(unlist(ex_r$permutation_standard_error)-3))<1e-14)
+ex_refs<-list(EMPTY=list(values=list(list(0,0),list(1,1)),weights=list(.5,.5)));for(k in c('0','1','0,1'))ex_refs[[k]]<-list(values=list(list(1,1)),weights=list(1))
+ex_mask<-list(masking='SUPPLIED_CONDITIONAL_DISTRIBUTIONS',reference_id='joint',reference_version='1',coalition_backgrounds=ex_refs);ex_r<-estimate_credit_shapley_values(function(z)z[,1],c(1,1),NULL,ex_contract(),ex_groups,ex_mask)$value;stopifnot(ex_r$baseline==.5,identical(unlist(ex_r$values),c(.25,.25)))
+ex_mask$coalition_backgrounds[['1']]$values<-list(list(1,0));ex_error(estimate_credit_shapley_values(function(z)z[,1],c(1,1),NULL,ex_contract(),ex_groups,ex_mask),'EXPLANATION_MASK')

@@ -1,0 +1,8 @@
+if(!exists('build_recovery_episodes'))library(creditratingsystem)
+p<-'creditratingsystem-r/examples/retail_application_phases.R';if(!file.exists(p))p<-system.file('examples','retail_application_phases.R',package='creditratingsystem');source(p)
+bindings<-setNames(lapply(c('model','calibrator','policy'),function(k)content_fingerprint(list(role=k,scope='INDEPENDENT_COMPONENT_TEST_ONLY'))$value),c('model','calibrator','policy'))
+src<-jsonlite::read_json(rj_resource('retail_application_journey.json'),simplifyVector=FALSE);dat<-jsonlite::read_json(rj_resource('retail_application_phases.json'),simplifyVector=FALSE)
+for(product in names(dat$products)){x<-dat$products[[product]];r<-rap_assess(src$products[[product]],x,dat$evaluation_cutoff,bindings);a<-r$summary;stopifnot(a$investment_loss==400,a$realized_book_mean_loss==200,a$remaining_claim==0,a$ever_default,a$dpd==if(product=='RETAIL_EDUCATION_LOAN')0 else 5,a$claim_waiver==if(product=='RETAIL_AUTO_LEASE')90 else 400,r$episodes_at_account_exit$episodes[[1]]$status=='open',r$recovery_episodes$episodes[[1]]$closed_at=='2025-01-30',!r$proposal$contract_changed,length(a$phases)==8)}
+p<-'RETAIL_UNSECURED_INSTALLMENT';x<-dat$products[[p]];x$settlement_date<-'2025-01-25';stopifnot(inherits(try(rap_assess(src$products[[p]],x,dat$evaluation_cutoff,bindings),silent=TRUE),'try-error'))
+p<-'RETAIL_AUTO_LEASE';x<-dat$products[[p]];x$claim_cash<-600;x$claim_amount<-690;stopifnot(inherits(try(rap_assess(src$products[[p]],x,dat$evaluation_cutoff,bindings),silent=TRUE),'try-error'))
+p<-'RETAIL_UNSECURED_INSTALLMENT';x<-dat$products[[p]];x$proposal_status<-'ACCEPTED';stopifnot(inherits(try(rap_assess(src$products[[p]],x,dat$evaluation_cutoff,bindings),silent=TRUE),'try-error'))

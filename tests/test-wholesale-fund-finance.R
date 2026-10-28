@@ -1,0 +1,11 @@
+library(creditratingsystem)
+source(system.file('examples/wholesale_fund_finance.R',package='creditratingsystem'))
+data<-jsonlite::fromJSON(system.file('extdata/wholesale_fund_finance.json',package='creditratingsystem'),simplifyVector=FALSE)
+r<-run_wholesale_fund_finance(data)
+rows<-setNames(r$cases,vapply(r$cases,function(x)x$variant,character(1)))
+stopifnot(identical(vapply(rows,function(x)x$borrowing_bases[[1]]$borrowing_base,numeric(1),USE.NAMES=FALSE),c(36,36,70)))
+stopifnot(rows$subscription_line$borrowing_bases[[2]]$borrowing_base==0,rows$subscription_line$borrowing_bases[[2]]$liquidity_gap==25,abs(rows$levered_fund$borrowing_bases[[2]]$liquidity_gap-23.3)<1e-12)
+stopifnot(identical(vapply(rows,function(x)x$underlying_asset_loss$portfolios[[1]]$path_losses[[2]],numeric(1),USE.NAMES=FALSE),c(38,38,39)),all(vapply(rows,function(x)x$reported_fund_pd,numeric(1))<.2))
+bad<-data;bad$cases[[2]]$borrowing_base_basis<-'ELIGIBLE_NAV'
+error<-tryCatch({run_wholesale_fund_finance(bad,verify_reference=FALSE);NULL},error=function(e)e)
+stopifnot(inherits(error,'error'),grepl('incompatible',conditionMessage(error)))

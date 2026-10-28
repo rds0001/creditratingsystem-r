@@ -1,0 +1,31 @@
+library(creditratingsystem)
+expect_code<-function(expr,code){actual<-tryCatch({force(expr);"NO_ERROR"},creditratingsystem_error=function(e)e$code);stopifnot(identical(actual,code))}
+inverse<-conditional_pd_from_cumulative(c(.1,.28,1,1))$value
+stopifnot(max(abs(unlist(inverse$conditional_pd[1:3])-c(.1,.2,1)))<1e-14,is.null(inverse$conditional_pd[[4]]),inverse$undefined_after_full_default[[4]])
+expect_code(conditional_pd_from_cumulative(c(.2,.1)),"NONMONOTONE_CURVE")
+hazards<-hazard_to_pd(c(1e-20,.2,.2),c(1,1,2))$value
+stopifnot(abs(hazards$conditional_pd[1]/1e-20-1)<1e-12,abs(tail(hazards$cumulative_pd,1)+expm1(-.6))<1e-14,abs(sum(hazards$marginal_pd)-tail(hazards$cumulative_pd,1))<1e-14)
+states<-c("A","B","D")
+project<-function(m,t,kind="generator",...)project_transition_matrix(m,t,kind,states,"D",...)
+p<-matrix(c(.8,.1,.1,0,.9,.1,0,0,1),3,byrow=TRUE)
+powered<-project(p,2,"transition",step_length=1)$value$matrix
+stopifnot(max(abs(powered-matrix(c(.64,.17,.19,0,.81,.19,0,0,1),3,byrow=TRUE)))<1e-14)
+q<-matrix(c(-.3,.3,0,0,-.3,.3,0,0,0),3,byrow=TRUE)
+projected<-project(q,2)$value$matrix;e<-exp(-.6)
+stopifnot(max(abs(projected-matrix(c(e,.6*e,1-1.6*e,0,e,1-e,0,0,1),3,byrow=TRUE)))<3e-15,
+ max(abs(project(q,.7)$value$matrix%*%project(q,1.3)$value$matrix-projected))<3e-15,
+ identical(unname(project(q,0)$value$matrix),diag(3)))
+expect_code(project(p,.5,"transition",step_length=1),"INCOMPATIBLE_HORIZON")
+ratings<-list(list(entity_id="x",at="2020-01-01",known_at="2020-01-01",state="A"),list(entity_id="x",at="2020-07-01",known_at="2020-07-02",state="B"),list(entity_id="x",at="2020-10-01",known_at="2020-10-02",state="D"),list(entity_id="y",at="2020-01-01",known_at="2020-01-01",state="A"),list(entity_id="z",at="2020-01-01",known_at="2020-01-01",state="B"))
+windows<-lapply(c("x","y","z"),function(e)list(entity_id=e,start="2020-01-01",end="2021-01-01",complete_until="2021-01-01",known_at="2021-01-02"))
+estimate<-function(estimator="cohort",exits=NULL)estimate_transition_matrix(ratings,windows,states,"D",estimator,"2021-02-01","exact_event_times",exits,if(estimator=="cohort")366 else NULL,366)
+cohort<-estimate();duration<-estimate("duration")
+stopifnot(max(abs(cohort$value$matrix-matrix(c(.5,0,.5,0,1,0,0,0,1),3,byrow=TRUE)))<1e-14,
+ max(abs(duration$value$exposure_years-c(548,458,92)/366))<1e-14,
+ max(abs(duration$value$matrix-matrix(c(-366/548,366/548,0,0,-366/458,366/458,0,0,0),3,byrow=TRUE)))<1e-14)
+exits<-list(list(entity_id="x",at="2020-11-01",known_at="2020-11-02"),list(entity_id="y",at="2020-08-01",known_at="2020-08-02"))
+censored<-estimate(exits=exits)
+stopifnot(censored$value$matrix[1,3]==1,censored$diagnostics$excluded_entities[[1]]$entity_id=="y")
+expect_code(estimate_transition_matrix(ratings,windows,c("A","B","C","D"),"D","cohort","2021-02-01","exact_event_times",cohort_period_days=366),"EMPTY_TRANSITION_ROW")
+cure<-c(ratings,list(list(entity_id="x",at="2020-12-01",known_at="2020-12-02",state="A")))
+expect_code(estimate_transition_matrix(cure,windows,states,"D","duration","2021-02-01","exact_event_times"),"DEFAULT_NOT_ABSORBING")

@@ -1,0 +1,57 @@
+# Undrawn commitments: conditional EAD is not the current drawn balance.
+if(!exists('fit_binary_glm'))library(creditratingsystem)
+run_wholesale_revolver <- function(data=NULL,verify_reference=TRUE) {
+ if(is.null(data))data<-jsonlite::fromJSON(system.file('extdata/wholesale_revolver.json',package='creditratingsystem'),simplifyVector=FALSE)
+ t<-data$target;tr<-data$training;asof<-data$as_of;known<-data$known_at;features<-unlist(tr$feature_order)
+ model<-fit_binary_glm(do.call(rbind,lapply(tr$X,unlist)),unlist(tr$y),weights=unlist(tr$weights),link='logit',feature_order=features,fit_intercept=TRUE,target=t,training=tr$metadata,model_id='wholesale-revolver',model_version='1')
+ cal<-data$calibration;for(k in c('base_pd','outcomes','groups','weights'))cal[[k]]<-unlist(cal[[k]])
+ calibrator<-do.call(fit_hierarchical_calibration,cal)
+ prior<-do.call(fit_elicited_beta_prior,data$elicitation)$value
+ rubric<-do.call(compile_qualitative_rubric,data$rubric)
+ evidence<-evaluate_qualitative_evidence(rubric,data$observations,data$evidence,as_of=asof,known_at=known)$value
+ unverified<-lapply(data$evidence,function(e){e$status<-'UNVERIFIED';e})
+ missing<-evaluate_qualitative_evidence(rubric,data$observations,unverified,as_of=asof,known_at=known)$value
+ lgdfit<-fit_fractional_lgd(matrix(numeric(),nrow=4,ncol=0),c(.1,.3,.5,.7),feature_order=character(),link='logit',covariance='HC0',target=data$lgd_target,training=data$lgd_training,model_id='revolver-lgd',model_version='1')
+ lgd<-predict_lgd(lgdfit,matrix(numeric(),nrow=1,ncol=0),feature_order=character(),expected_target=data$lgd_target,default_condition='given_default')$value$mean_lgd[[1]]
+ eadfit<-fit_ead_model(data$exposure_episodes,matrix(numeric(),nrow=3,ncol=0),feature_order=character(),target_mode='ccf',model_spec=list(mean_model='identity',covariance='HC0'),target=data$ead_target,training=data$ead_training,model_id='revolver-ead',model_version='1',currency='EUR')
+ policy<-compile_credit_decision_policy(data$decision_policy)
+ variants<-list()
+ for(v in data$variants){
+  identity<-v$id;facts<-list(product=identity,legal_cancellation=v$cancellable,financial_statements=TRUE,active=TRUE)
+  dated<-lapply(facts,function(x)list(value=x,observed_at=asof,known_at=known))
+  subject<-list(subject_id=identity,version='1',attributes=dated,effective_from=asof,effective_to=NULL,known_at=known)
+  subjects<-build_rating_subjects(list(facility=list(subject)),list(),asof,known)$value
+  snap<-list(subject_id=identity,subject_type='facility',as_of=asof,known_at=known,attributes=dated)
+  rule<-list(rule_id=identity,profile_id=paste0('wholesale-',identity),profile_version='1',priority=1,effective_from=asof,effective_to=NULL,known_at=known,conditions=list(list(field='product',operator='eq',value=identity),list(field='legal_cancellation',operator='eq',value=v$cancellable)))
+  route<-route_rating_profile(snap,list(rule),asof,known)$value
+  applicability_contract<-list(contract_id=identity,version='1',required_features=list('financial_statements','active','legal_cancellation'),allowed_values=list(financial_statements=list(TRUE),active=list(TRUE)),support_bounds=setNames(list(),character()),maximum_age_days=setNames(list(),character()))
+  applicability<-assess_rating_applicability(snap,applicability_contract,asof,known)$value
+  bad<-snap;bad$attributes$financial_statements['value']<-list(NULL)
+  negative<-assess_rating_applicability(bad,applicability_contract,asof,known)$value
+  statement<-list(entity_id=identity,currency='EUR',as_of='2023-12-31',period_start='2023-01-01',period_end='2023-12-31',values=list(debt=50,cash=10,ebitda=20),units=list(debt='EUR',cash='EUR',ebitda='EUR'))
+  leverage<-build_financial_ratios(list(statement),data$ratio_spec)$value[[1]]$ratios$net_debt_ebitda$value
+  prediction<-predict_pd(model,matrix(leverage,ncol=1),feature_order=features,expected_target=t)
+  pd<-apply_calibrator(calibrator,prediction$value,groups=c(v$group),target=t,base_model_version='1')$value[1]
+  exposure<-predict_ead(eadfit,matrix(numeric(),nrow=1,ncol=0),feature_order=character(),expected_target=data$ead_target,reference_dates=c(asof),default_dates=c('2024-01-31'),reference_drawn=c(0),reference_limit=c(v$limit),currency='EUR')$value$conditional_ead[[1]]
+  loss<-expected_loss(pd,lgd,exposure,context=list(currency='EUR'))$value
+  contract<-list(facility_id=identity,currency='EUR',as_of=asof,drawn_principal=0,credit_limit=v$limit,accrued_interest=0)
+  event<-list(event_id='conditional-draw',event_date='2024-01-16',known_at=known,sequence=0,kind='DRAW',amount=v$planned_draw)
+  opts<-list(annual_interest_rates=c(0),period_end_dates=c('2024-01-31'),day_count='ACT/365F',default_timing='AFTER_PERIOD_END_EVENTS',allow_overlimit=FALSE,currency='EUR')
+  schedule<-do.call(exposure_schedule,c(list(contract=contract,events=list(event)),opts))$value
+  cancellation<-NULL
+  if(v$cancellable){cancel<-list(event_id='executed-cancellation',event_date='2024-01-10',known_at=known,sequence=0,kind='LIMIT_CHANGE',amount=0);cancellation<-do.call(exposure_schedule,c(list(contract=contract,events=list(cancel)),opts))$value}
+  loss_target<-t;loss_target$event<-'expected_credit_loss'
+  quantities<-c('PD','LGD','EAD','EL');values<-c(pd,lgd,exposure,loss);variant_names<-c('unconditional-default','conditional-recovery','conditional-exposure','unconditional-loss');definitions<-list(t,data$lgd_target,data$ead_target,loss_target)
+  components<-lapply(seq_along(quantities),function(i){z<-list(component_id=quantities[i],quantity=quantities[i],value=values[i],subject_id=identity,subject_type='facility',variant=variant_names[i],definition=definitions[[i]]);if(quantities[i]%in%c('EAD','EL'))z$currency<-'EUR';z})
+  binding<-list(profile_id=route$profile_id,profile_version='1',model_id='wholesale-revolver',model_version='1',model_hash=prediction$diagnostics$model_hash,input_hash=prediction$diagnostics$prediction_input_hash)
+  assessment<-compose_risk_assessment(paste0('assessment-',identity),list(subject_id=identity,subject_type='facility'),components,binding,asof,known,known)$value
+  timing<-list(as_of=asof,known_at=known)
+  args<-list(policy=policy,risk=c(timing,list(pd=pd,target=t,freshness='CURRENT')),affordability=c(timing,list(status=if(data$credit_gate_inputs$available_cashflow>=data$credit_gate_inputs$debt_service_due)'AFFORDABLE'else'NOT_AFFORDABLE')),eligibility=c(timing,list(status=if(evidence$status=='READY')'ELIGIBLE'else'INELIGIBLE')),operations=c(timing,list(status=data$credit_gate_inputs$operations_status)),as_of=asof,known_at=known)
+  decision<-do.call(apply_credit_decision_policy,args)$value
+  args$eligibility$status<-'INELIGIBLE';blocked<-do.call(apply_credit_decision_policy,args)$value
+  variants[[identity]]<-list(profile_id=route$profile_id,applicability=applicability$status,negative_status=negative$status,subject_count=length(subjects$subjects),reference_drawn=0,reference_limit=v$limit,pd=pd,lgd=lgd,conditional_ead=exposure,expected_loss=loss,conditional_draw_schedule=schedule,contractual_cancellation=cancellation,assessment_components=assessment$components,assessment_conflicts=assessment$conflicts,decision=decision$action,missing_evidence_decision=blocked$action)
+  if(verify_reference)stopifnot(abs(pd-.1)<1e-6,abs(lgd-.4)<1e-10,abs(exposure-v$limit*.5)<1e-10,abs(loss-.02*v$limit)<1e-5,schedule$schedule[[1]]$conditional_ead==v$planned_draw,negative$status=='REFER',decision$action=='APPROVE',blocked$action!='APPROVE',length(assessment$conflicts)==0)
+ }
+ if(verify_reference)stopifnot(prior$alpha==2,prior$beta==18,evidence$score==20,missing$status=='REFER',variants$cancellable$contractual_cancellation$schedule[[1]]$conditional_ead==0)
+ list(product=data$product,data_origin='SYNTHETIC',target=t,credit_gate_inputs=data$credit_gate_inputs,expert_prior=list(alpha=prior$alpha,beta=prior$beta),qualitative_score=evidence$score,missing_evidence_status=missing$status,hierarchical_variance=calibrator$value$parameters$variance,variants=variants)
+}

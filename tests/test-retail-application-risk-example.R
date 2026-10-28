@@ -1,0 +1,9 @@
+if(!exists('predict_ead',mode='function'))library(creditratingsystem)
+p<-'creditratingsystem-r/examples/retail_application_risk.R';if(!file.exists(p))p<-system.file('examples','retail_application_risk.R',package='creditratingsystem');source(p)
+resource<-function(n){p<-system.file('extdata',n,package='creditratingsystem');if(!nzchar(p))p<-file.path('creditratingsystem-r/inst/extdata',n);jsonlite::read_json(p,simplifyVector=FALSE)}
+r<-run_retail_application_risk(product_ids='RETAIL_UNSECURED_INSTALLMENT',return_artifacts=TRUE);v<-r$products$RETAIL_UNSECURED_INSTALLMENT;raw<-r$raw_artifacts$RETAIL_UNSECURED_INSTALLMENT
+stopifnot(v$application_id=='RETAIL_UNSECURED_INSTALLMENT-DEFAULT_THEN_EXIT',abs(v$conditional_lgd-.4)<1e-9,v$thirty_day_expected_loss==300,abs(raw$loss_result$lifetime_expected_loss-.75*1000*.4)<1e-8,raw$lgd_model$training$known_at<'2024-12-29')
+src<-resource('retail_application_journey.json');dat<-resource('retail_application_risk.json');p<-'RETAIL_UNSECURED_INSTALLMENT';bad<-dat$products[[p]];bad$account_id<-'unrelated';stopifnot(inherits(try(.rar_evaluate(p,src$products[[p]],bad,src$target),silent=TRUE),'try-error'))
+bad<-dat$products[[p]];bad$assumptions_known_at<-'2025-01-01';stopifnot(inherits(try(.rar_evaluate(p,src$products[[p]],bad,src$target),silent=TRUE),'try-error'))
+p<-'RETAIL_AUTO_LEASE';bad<-dat$products[[p]];bad$conditional_ead<-1000;stopifnot(inherits(try(.rar_evaluate(p,src$products[[p]],bad,src$target),silent=TRUE),'try-error'))
+if(Sys.getenv('CREDITRATINGSYSTEM_EXTENDED_TESTS')=='true'){r<-run_retail_application_risk();stopifnot(length(r$products)==6,r$products$RETAIL_BNPL$thirty_day_expected_loss==281.25,r$products$RETAIL_MICRO_LOAN$micro$maximum_feasible_amount==1000,r$products$RETAIL_AUTO_LEASE$conditional_ead==90)}

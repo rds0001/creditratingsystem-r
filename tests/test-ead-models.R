@@ -1,0 +1,17 @@
+if(!exists('fit_ead_model'))library(creditratingsystem)
+eadm_target<-list(event='ead',horizon=30,time_unit='days',probability_measure='PHYSICAL',conditioning='given_default',currency='EUR');eadm_training<-list(data_fingerprint='independent-oracle',split_id='train',known_at='2024-02-01',data_origin='SYNTHETIC')
+eadm_near<-function(x,y)stopifnot(isTRUE(all.equal(as.numeric(unlist(x)),as.numeric(y),tolerance=1e-9)))
+eadm_error<-function(code,expr){e<-tryCatch({force(expr);NULL},error=identity);stopifnot(inherits(e,'creditratingsystem_error'),identical(e$code,code))}
+eadm_episodes<-function(values)lapply(seq_along(values),function(i)list(episode_id=as.character(i),reference_date='2024-01-01',reference_known_at='2024-01-01',default_date='2024-01-31',default_known_at='2024-01-31',features_observed_at='2024-01-01',features_known_at='2024-01-01',reference_drawn=40,reference_limit=100,ead_at_default=values[i],currency='EUR'))
+eadm_fit<-function(values,mode='ccf',zero_model='none',rows=NULL)fit_ead_model(if(is.null(rows))eadm_episodes(values) else rows,matrix(numeric(),length(values),0),character(),mode,if(mode=='ccf')list(mean_model='identity',covariance='HC0') else list(positive_distribution='lognormal',zero_model=zero_model),eadm_target,eadm_training,'ead','1','EUR')
+eadm_predict<-function(f,...)predict_ead(f,matrix(numeric(),1,0),character(),eadm_target,'2024-02-01','2024-03-02','EUR',...)
+f<-eadm_fit(c(10,70,130));eadm_near(f$model$parameters$regression$coefficients,.5);eadm_near(f$model$parameters$regression$covariance,2/9);p<-eadm_predict(f,reference_drawn=40,reference_limit=100);eadm_near(p$value$conditional_ead,70);stopifnot(p$provenance$data_origin=='SYNTHETIC')
+eadm_error('DISTRIBUTION_NOT_IDENTIFIED',eadm_predict(f,reference_drawn=40,reference_limit=100,quantile_levels=.5))
+f<-eadm_fit(c(1,exp(2)),'direct_ead');p<-eadm_predict(f,quantile_levels=.5);eadm_near(p$value$conditional_ead,exp(1.5));eadm_near(p$value$quantiles,exp(1))
+f<-eadm_fit(c(0,0,1,exp(2)),'direct_ead','logit');p<-eadm_predict(f,quantile_levels=c(.25,.5,.75));eadm_near(p$value$conditional_ead,.5*exp(1.5));eadm_near(p$value$quantiles,c(0,0,exp(1)))
+f<-eadm_fit(c(0,0),'direct_ead','all_zero');eadm_near(eadm_predict(f,quantile_levels=.5)$value$quantiles,0)
+rows<-eadm_episodes(c(10,70,130,100));rows[[4]]$reference_drawn<-100;rows[[4]]$reference_limit<-100;f<-eadm_fit(c(10,70,130,100),rows=rows);stopifnot(f$diagnostics$excluded_rows[[1]]$reason=='NO_POSITIVE_UNDRAWN')
+rows<-eadm_episodes(c(10,70,130));rows[[1]]$features_known_at<-'2024-01-02';eadm_error('EXPOSURE_DATE',eadm_fit(c(10,70,130),rows=rows));eadm_error('NEGATIVE_EAD_PREDICTION',eadm_predict(eadm_fit(c(10,10,10)),reference_drawn=0,reference_limit=100));eadm_error('NON_IDENTIFIABLE',eadm_fit(c(10,10),'direct_ead'))
+cat('Native EAD model independent cases PASS\n')
+
+bad_target<-eadm_target;bad_target$event<-'default_probability';eadm_error('TARGET_MISMATCH',fit_ead_model(eadm_episodes(c(10,70,130)),matrix(numeric(),3,0),character(),'ccf',list(mean_model='identity',covariance='HC0'),bad_target,eadm_training,'bad','1','EUR'))

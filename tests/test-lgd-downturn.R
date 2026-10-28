@@ -1,0 +1,11 @@
+if(!exists('estimate_downturn_lgd'))library(creditratingsystem)
+dt_target<-list(event='loss',horizon=5,time_unit='years',probability_measure='PHYSICAL',conditioning='given_default');dt_train<-list(data_fingerprint='group-oracle',split_id='train',known_at='2024-01-01',data_origin='SYNTHETIC',workout_population='closed_defaulted_episodes')
+dt_model<-fit_fractional_lgd(matrix(c(0,0,1,1),4,1),c(0,.5,.5,1),'stress','logit','HC0',dt_target,dt_train,'lgd','1')
+dt_policy<-list(definition_id='explicit',version='1',selection_basis='User stress indicator 0 to1',baseline_scenario_id='base',adverse_scenario_id='adverse',known_at='2024-01-01',as_of='2024-01-01',unit_ids=list('a','b'),extrapolation_policy='error')
+dt_call<-function(base=c(0,0),adverse=c(1,1),policy=dt_policy,...)estimate_downturn_lgd(dt_model,matrix(base,2,1),matrix(adverse,2,1),c(1e308,1e308),'stress',dt_target,policy,...)
+dt_near<-function(x,y)stopifnot(isTRUE(all.equal(as.numeric(unlist(x)),y,tolerance=1e-9)))
+dt_error<-function(code,expr){e<-tryCatch({force(expr);NULL},error=identity);stopifnot(inherits(e,'creditratingsystem_error'),identical(e$code,code))}
+r<-dt_call();dt_near(r$value$baseline_lgd,.25);dt_near(r$value$downturn_lgd,.75);dt_near(r$value$difference,.5);dt_near(dt_call(adverse=c(0,0))$value$difference,0);dt_near(dt_call(base=c(1,1),adverse=c(0,0))$value$difference,-.5)
+dt_error('DOWNTURN_SUPPORT',dt_call(adverse=c(2,2)));policy<-dt_policy;policy$extrapolation_policy<-'report';stopifnot(all(unlist(dt_call(adverse=c(2,2),policy=policy)$diagnostics$adverse_outside_marginal_range)))
+draws<-list(dt_model$model,dt_model$model);draws[[1]]$parameters$coefficients<-list(0,0);draws[[2]]$parameters$coefficients<-as.list(c(-log(3),2*log(3)));u<-dt_call(model_draws=draws,uncertainty_contract=list(source='user_supplied',interpretation='Two illustrative paired parameter draws'),interval_level=.8)$value$uncertainty;dt_near(u$uplift_interval,c(.05,.45))
+cat('Native downturn matched-scenario and paired-draw cases PASS\n')

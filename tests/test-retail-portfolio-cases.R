@@ -1,0 +1,14 @@
+if(!exists('retail_pool_diagnostics'))library(creditratingsystem)
+rpc_example<-system.file('examples/retail_portfolio_cases.R',package='creditratingsystem');rpc_data_file<-system.file('extdata/retail_portfolio_cases.json',package='creditratingsystem')
+if(!nzchar(rpc_example))rpc_example<-'creditratingsystem-r/examples/retail_portfolio_cases.R'
+if(!nzchar(rpc_data_file))rpc_data_file<-'creditratingsystem-r/inst/extdata/retail_portfolio_cases.json'
+source(rpc_example);rpc_data<-jsonlite::fromJSON(rpc_data_file,simplifyVector=FALSE);rpc_result<-run_retail_portfolio_cases(rpc_data)
+stopifnot(length(rpc_result$cases)==12)
+for(r in rpc_result$cases){stopifnot(r$default_count_backtest$overall$observed_count==6,r$pool_diagnostics$coverage$mature_eligible_count==6,r$lgd_backtest$coverage$included_count==2,r$portfolio_risk$stress$stressed_distribution$tails[[1]]$expected_shortfall>r$portfolio_risk$stress$base_distribution$tails[[1]]$expected_shortfall);for(row in r$observed_pool_parameters)for(value in row)if(is.list(value))stopifnot(!('independent_episode_standard_error'%in%names(value)))}
+f<-rpc_data$cases$RETAIL_BNPL;f$positions<-f$positions[c(1,6)];r<-.rpc_portfolio(f,'RETAIL_BNPL_TWO_HELD_FACILITIES');loss<-.4*f$positions[[1]]$ead;stopifnot(identical(sort(unlist(r$simulation$portfolio_loss_paths)),c(0,loss,loss,2*loss)),abs(r$distribution$expected_loss-.6*loss)<1e-10,abs(r$distribution$tails[[1]]$expected_shortfall-1.25*loss)<1e-10,abs(r$paired_facility_removal$expected_loss_change+.1*loss)<1e-10,abs(r$paired_facility_removal$tail_changes[[1]]$expected_shortfall_change+.25*loss)<1e-10)
+rpc_error<-function(expr,code=NULL){e<-tryCatch(force(expr),error=identity);stopifnot(inherits(e,'creditratingsystem_error'));if(!is.null(code))stopifnot(e$code==code)}
+f<-rpc_data;f$cases<-f$cases['RETAIL_CREDIT_CARD'];f$cases[[1]]$pool_fit$observations[[1]]$role<-'VALIDATION';rpc_error(run_retail_portfolio_cases(f))
+f<-rpc_data$cases$RETAIL_CREDIT_CARD;duplicate<-f$positions[[1]];duplicate$position_id<-'duplicate-lot';duplicate$claim_id<-'duplicate-claim';f$positions[[7]]<-duplicate;rpc_error(.rpc_portfolio(f,'duplicate'),'PORTFOLIO_ALLOCATION')
+cat('Twelve actual retail cohorts, complete ten-method portfolio recipe, two-name fractional tail and leakage/duplicate negatives PASS\n')
+f<-rpc_data;f$cases<-f$cases['RETAIL_MICRO_LOAN'];f$cases[[1]]$predictions[[1]]$cluster_id<-'split-household';rpc_error(run_retail_portfolio_cases(f))
+f<-rpc_data$cases$RETAIL_OVERDRAFT;f$positions[[2]]$entity_id<-f$positions[[1]]$entity_id;r<-.rpc_portfolio(f,'shared-borrower');stopifnot(length(r$prepared$default_group_ids)==5,all(vapply(r$simulation$position_defaults,function(row)identical(row[[1]],row[[2]]),logical(1))),max(abs(unlist(r$simulation$portfolio_loss_paths)-unlist(r$migration$marked_values$portfolio_marked_loss_paths)))<1e-8)
